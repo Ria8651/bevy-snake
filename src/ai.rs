@@ -6,8 +6,8 @@ use crate::{
 use bevy::prelude::*;
 use rand::{prelude::SliceRandom, rngs::StdRng, SeedableRng};
 use std::{
-    collections::{HashSet, VecDeque},
-    time::Instant,
+    collections::{HashMap, HashSet, VecDeque},
+    time::{Duration, Instant},
 };
 
 pub struct AIPlugin;
@@ -28,7 +28,10 @@ fn ai_system(
 ) {
     if tick_timer.just_finished() || !settings.do_game_tick {
         // let ai = RandomWalk;
-        let ai = TreeSearch { max_depth: 70 };
+        let ai = TreeSearch {
+            max_depth: 100,
+            max_time: Duration::from_millis(5),
+        };
 
         let mut new_ai_gizmos = AIGizmos::default();
 
@@ -43,17 +46,20 @@ fn ai_system(
     }
 
     if settings.gizmos {
-        let board_pos = |pos: IVec2| {
+        let board_pos = |pos: Vec2| {
             Vec2::new(
                 pos.x as f32 - board.width() as f32 / 2.0 + 0.5,
                 pos.y as f32 - board.height() as f32 / 2.0 + 0.5,
             )
         };
         for (start, end, color) in ai_gizmos.lines.iter() {
-            gizmos.line_2d(board_pos(*start), board_pos(*end), *color);
+            gizmos.line_2d(board_pos(start.as_vec2()), board_pos(end.as_vec2()), *color);
+        }
+        for (start, end, color) in ai_gizmos.arrows.iter() {
+            gizmos.arrow_2d(board_pos(*start), board_pos(*end), *color);
         }
         for (pos, color) in ai_gizmos.points.iter() {
-            gizmos.circle_2d(board_pos(*pos), 0.3, *color);
+            gizmos.circle_2d(board_pos(pos.as_vec2()), 0.3, *color);
         }
     }
 }
@@ -85,10 +91,187 @@ impl SnakeAI for RandomWalk {
 
 struct TreeSearch {
     max_depth: usize,
+    max_time: Duration,
+}
+
+pub fn cycle_basis(graph: &Vec<Vec<usize>>) -> Vec<Vec<usize>> {
+    let mut cycles: Vec<Vec<usize>> = Vec::new();
+    let root_index = 0;
+    // Stack (ie "pushdown list") of vertices already in the spanning tree
+    let mut stack: Vec<usize> = vec![root_index];
+    // Map of node index to predecessor node index
+    let mut pred: HashMap<usize, usize> = HashMap::new();
+    pred.insert(root_index, root_index);
+    // Set of examined nodes during this iteration
+    let mut used: HashMap<usize, HashSet<usize>> = HashMap::new();
+    used.insert(root_index, HashSet::new());
+    // Walk the spanning tree
+    while !stack.is_empty() {
+        // Use the last element added so that cycles are easier to find
+        let z = stack.pop().unwrap();
+        for neighbor in graph[z].iter().copied() {
+            // A new node was encountered:
+            if !used.contains_key(&neighbor) {
+                pred.insert(neighbor, z);
+                stack.push(neighbor);
+                let mut temp_set: HashSet<usize> = HashSet::new();
+                temp_set.insert(z);
+                used.insert(neighbor, temp_set);
+            // A self loop:
+            } else if z == neighbor {
+                let cycle: Vec<usize> = vec![z];
+                cycles.push(cycle);
+            // A cycle was found:
+            } else if !used.get(&z).unwrap().contains(&neighbor) {
+                let pn = used.get(&neighbor).unwrap();
+                let mut cycle: Vec<usize> = vec![neighbor, z];
+                let mut p = pred.get(&z).unwrap();
+                while !pn.contains(p) {
+                    cycle.push(*p);
+                    p = pred.get(p).unwrap();
+                }
+                cycle.push(*p);
+                cycles.push(cycle);
+                let neighbor_set = used.get_mut(&neighbor).unwrap();
+                neighbor_set.insert(z);
+            }
+        }
+    }
+
+    cycles
 }
 
 impl SnakeAI for TreeSearch {
     fn chose_move(&self, board: &Board, gizmos: &mut AIGizmos) -> Result<Direction, ()> {
+        // let mut cycles: Vec<Vec<IVec2>> = Vec::new();
+        // let mut graph_nodes: HashSet<IVec2> = board
+        //     .cells()
+        //     .filter_map(|(pos, cell)| {
+        //         if matches!(cell, Cell::Empty | Cell::Apple { .. }) {
+        //             Some(pos)
+        //         } else {
+        //             None
+        //         }
+        //     })
+        //     .collect();
+        // while !graph_nodes.is_empty() {
+        //     let root = {
+        //         let root = *graph_nodes.iter().next().unwrap();
+        //         graph_nodes.remove(&root);
+        //         root
+        //     };
+        //     let mut stack = vec![root];
+        //     let mut parent = HashMap::from([(root, None::<IVec2>)]);
+
+        // }
+
+        // // find a spanning tree of the board
+        // let mut root = None;
+        // for (pos, cell) in board.cells() {
+        //     if !matches!(cell, Cell::Wall) {
+        //         root = Some(pos);
+        //         break;
+        //     }
+        // }
+        // let root = root.expect("no empty cells in board");
+
+        // let mut queue = VecDeque::from([root]);
+        // let mut parent = HashMap::from([(root, None)]);
+        // while let Some(pos) = queue.pop_front() {
+        //     for dir in Direction::ALL {
+        //         let next_pos = pos + dir.as_vec2();
+
+        //         if !board.in_bounds(next_pos) {
+        //             continue;
+        //         }
+
+        //         if parent.contains_key(&next_pos) {
+        //             continue;
+        //         }
+
+        //         if !matches!(board.get(next_pos), Ok(Cell::Wall)) {
+        //             parent.insert(next_pos, Some(pos));
+        //             queue.push_back(next_pos);
+        //         }
+        //     }
+        // }
+
+        // // show spanning tree in blue
+        // let blue = Color::srgb(0.0, 0.0, 1.0);
+        // for (pos, parent_pos) in parent.iter() {
+        //     if let Some(parent_pos) = parent_pos {
+        //         gizmos.arrows.push((*parent_pos, *pos, blue));
+        //     }
+        // }
+        // //
+
+        // find cycle basis of the board
+        let mut nodes = HashMap::new();
+        let mut graph = Vec::new();
+        for (pos, cell) in board.cells() {
+            if !matches!(cell, Cell::Wall) {
+                nodes.insert(pos, nodes.len());
+                graph.push(Vec::new());
+            }
+        }
+        for (node, index) in nodes.iter() {
+            for dir in Direction::ALL {
+                let next_node = *node + dir.as_vec2();
+                if let Some(next_index) = nodes.get(&next_node) {
+                    graph[*index].push(*next_index);
+                }
+            }
+        }
+        let cycles = cycle_basis(&graph);
+
+        // show cycles
+        let points: HashMap<_, _> = nodes.iter().map(|(pos, index)| (*index, *pos)).collect();
+        for (index, cycle) in cycles.iter().enumerate() {
+            let color = Color::srgb(
+                (index as f32 / cycles.len() as f32).min(1.0),
+                0.0,
+                1.0 - (index as f32 / cycles.len() as f32).min(1.0),
+            );
+            let com = cycle
+                .iter()
+                .fold(Vec2::ZERO, |acc, &index| acc + points[&index].as_vec2())
+                / cycle.len() as f32;
+            let points = cycle
+                .iter()
+                .map(|&index| points[&index].as_vec2() - (points[&index].as_vec2() - com) * 0.1)
+                .collect::<Vec<_>>();
+            for i in 0..cycle.len() {
+                let start = points[i];
+                let end = points[(i + 1) % cycle.len()];
+                gizmos.arrows.push((start, end, color));
+            }
+        }
+
+        // combine cycles
+        let mut edges = HashMap::new();
+        let mut index = 0;
+        for (cell, neighbors) in graph.iter().enumerate() {
+            for &neighbor in neighbors {
+                if neighbor < cell {
+                    edges.insert((neighbor, cell), index);
+                    index += 1;
+                }
+            }
+        }
+        let mut edge_cycles = Vec::new();
+        for cycle in cycles.iter() {
+            let mut edge_cycle = Vec::new();
+            for i in 0..cycle.len() {
+                let mut a = cycle[i];
+                let mut b = cycle[(i + 1) % cycle.len()];
+                if a > b {
+                    std::mem::swap(&mut a, &mut b);
+                }
+                edge_cycle.push(*edges.get(&(a.min(b), a.max(b))).unwrap());
+            }
+            edge_cycles.push(edge_cycle);
+        }
+
         let snakes = board.snakes();
         let snake = snakes.get(&0).ok_or(())?;
 
@@ -166,7 +349,7 @@ impl SnakeAI for TreeSearch {
                 }
             }
 
-            if start_time.elapsed().as_millis() > 5 {
+            if start_time.elapsed() > self.max_time {
                 final_boards.extend(queue);
                 break;
             }
@@ -175,15 +358,15 @@ impl SnakeAI for TreeSearch {
         for board in final_boards.iter_mut() {
             board.score = self.eval_board(&board.board, board.score, gizmos)?;
 
-            if board.score > 0.0 {
-                let mut head = snake.head;
-                for dir in board.history.iter() {
-                    gizmos
-                        .lines
-                        .push((head, head + dir.as_vec2(), Color::srgb(1.0, 0.0, 0.0)));
-                    head += dir.as_vec2();
-                }
-            }
+            // show path in red
+            // if board.score > 0.0 {
+            //     let red = Color::srgb(1.0, 0.0, 0.0);
+            //     let mut head = snake.head;
+            //     for dir in board.history.iter() {
+            //         gizmos.lines.push((head, head + dir.as_vec2(), red));
+            //         head += dir.as_vec2();
+            //     }
+            // }
         }
 
         let max_board = final_boards
@@ -192,13 +375,14 @@ impl SnakeAI for TreeSearch {
             .ok_or(())?;
 
         let dir = *max_board.history.first().unwrap();
-        let mut head = snake.head;
-        for dir in max_board.history {
-            gizmos
-                .lines
-                .push((head, head + dir.as_vec2(), Color::srgb(0.0, 1.0, 0.0)));
-            head += dir.as_vec2();
-        }
+
+        // show best path in green
+        // let green = Color::srgb(0.0, 1.0, 0.0);
+        // let mut head = snake.head;
+        // for dir in max_board.history {
+        //     gizmos.lines.push((head, head + dir.as_vec2(), green));
+        //     head += dir.as_vec2();
+        // }
 
         Ok(dir)
     }
@@ -256,13 +440,31 @@ impl TreeSearch {
             return Ok(BAD_SCORE + apple_score);
         }
 
+        let mut hole_score = 1.0;
+        for (pos, cell) in board.cells() {
+            if let Cell::Apple { .. } | Cell::Empty = cell {
+                let mut hole = true;
+                for dir in Direction::ALL {
+                    let next_pos = pos + dir.as_vec2();
+                    if let Ok(Cell::Empty | Cell::Apple { .. }) = board.get(next_pos) {
+                        hole = false;
+                        break;
+                    }
+                }
+                if hole {
+                    hole_score /= 2.0;
+                }
+            }
+        }
+
         // return Ok(apple_score);
-        return Ok(flood_fill + apple_score * 2.0);
+        return Ok(flood_fill + apple_score * 2.0 + hole_score * 2.0);
     }
 }
 
 #[derive(Default)]
 struct AIGizmos {
     lines: Vec<(IVec2, IVec2, Color)>,
+    arrows: Vec<(Vec2, Vec2, Color)>,
     points: Vec<(IVec2, Color)>,
 }
