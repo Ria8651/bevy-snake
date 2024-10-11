@@ -145,20 +145,20 @@ pub fn update_game(
     }
 
     if timer.just_finished() || !settings.do_game_tick {
-        let inputs: Vec<Option<Direction>> = input_queues
+        let mut inputs: Vec<Option<Direction>> = input_queues
             .iter_mut()
-            .map(|i| {
-                i.input_queue.pop_front().or_else(|| {
-                    web_resources
-                        .web_commands
-                        .try_recv()
-                        .ok()
-                        .and_then(|c| match c {
-                            WebCommands::SendInput { direction } => Some(direction),
-                        })
-                })
-            })
+            .map(|i| i.input_queue.pop_front())
             .collect();
+
+        if inputs[1].is_none() {
+            inputs[1] = web_resources
+                .web_commands
+                .try_recv()
+                .ok()
+                .and_then(|c| match c {
+                    WebCommands::SendInput { direction } => Some(direction),
+                })
+        }
 
         let snakes = board.snakes();
         if inputs[0..snakes.len()].iter().any(|i| i.is_some()) || settings.do_game_tick {

@@ -26,6 +26,13 @@ pub enum Speed {
     Fast,
 }
 
+#[derive(PartialEq, Eq, Reflect)]
+pub enum GizmoSetting {
+    None,
+    CycleBasis,
+    TreeSearch,
+}
+
 #[derive(Resource, Reflect)]
 pub struct Settings {
     pub interpolation: bool,
@@ -34,7 +41,7 @@ pub struct Settings {
     pub tps_ramp: bool,
     pub board_settings: BoardSettings,
     pub ai: bool,
-    pub gizmos: bool,
+    pub gizmos: GizmoSetting,
     pub walls: bool,
     pub walls_debug: bool,
 }
@@ -70,7 +77,7 @@ fn main() {
             tps_ramp: false,
             board_settings: BoardSettings::default(),
             ai: true,
-            gizmos: false,
+            gizmos: GizmoSetting::None,
             walls: false,
             walls_debug: false,
         })

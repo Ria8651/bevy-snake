@@ -263,9 +263,12 @@ impl Board {
         inputs: &[Option<Direction>],
     ) -> Result<Vec<BoardEvent>, BoardError> {
         let mut board_events = Vec::new();
+        let mut heads = HashMap::new();
         let mut grow = HashSet::new();
         let mut damage = HashSet::new();
         let mut spawn_apples = 0;
+
+        // find new heads
         for (snake_id, snake) in self.snakes().into_iter() {
             let input = *inputs
                 .get(snake_id as usize)
@@ -283,35 +286,65 @@ impl Board {
                 continue;
             }
 
-            match self[new_head] {
-                Cell::Apple { natural } => {
-                    grow.insert(snake_id);
-                    if natural {
-                        spawn_apples += 1;
-                    }
-                    board_events.push(BoardEvent::AppleEaten {
-                        snake: snake_id as u8,
-                    });
+            if heads.contains_key(&new_head) {
+                let (other_snake_id, _) = heads[&new_head];
+                damage.insert(other_snake_id);
+                damage.insert(snake_id);
+                continue;
+            }
+
+            if let Cell::Wall = self[new_head] {
+                damage.insert(snake_id);
+                continue;
+            }
+
+            heads.insert(new_head, (snake_id as u8, snake.parts.len() as u16));
+        }
+
+        // check for apples
+        for (head, (snake_id, _)) in heads.clone() {
+            if let Cell::Apple { natural } = self[head] {
+                grow.insert(snake_id);
+                if natural {
+                    spawn_apples += 1;
                 }
-                Cell::Wall => {
+                board_events.push(BoardEvent::AppleEaten {
+                    snake: snake_id as u8,
+                });
+            }
+        }
+
+        // shrink snakes (that didnt eat)
+        for (_, cell) in self.cells_mut() {
+            if let Cell::Snake { id, part } = cell {
+                if !grow.contains(id) {
+                    if *part == 0 {
+                        *cell = Cell::Empty;
+                    } else {
+                        *cell = Cell::Snake {
+                            id: *id,
+                            part: *part - 1,
+                        };
+                    }
+                }
+            }
+        }
+
+        // place new heads
+        for (head, (snake_id, part_number)) in heads {
+            if !damage.contains(&snake_id) {
+                if let Cell::Snake { .. } = self[head] {
                     damage.insert(snake_id);
                     continue;
                 }
-                Cell::Snake { id, part } => {
-                    if id != snake_id as u8 || part != 0 {
-                        damage.insert(snake_id);
-                        continue;
-                    }
-                }
-                Cell::Empty => {}
+                self[head] = Cell::Snake {
+                    id: snake_id,
+                    part: part_number - !grow.contains(&snake_id) as u16,
+                };
             }
-
-            self[new_head] = Cell::Snake {
-                id: snake_id as u8,
-                part: snake.parts.len() as u16,
-            };
         }
 
+        // remove damaged snakes
         for snake_id in damage.into_iter() {
             let mut parts = Vec::new();
             for (pos, cell) in self.cells() {
@@ -330,25 +363,12 @@ impl Board {
             });
         }
 
+        // check for game over
         if self.count_snakes() == 0 {
             board_events.push(BoardEvent::GameOver);
         }
 
-        for (_, cell) in self.cells_mut() {
-            if let Cell::Snake { id, part } = cell {
-                if !grow.contains(id) {
-                    if *part == 0 {
-                        *cell = Cell::Empty;
-                    } else {
-                        *cell = Cell::Snake {
-                            id: *id,
-                            part: *part - 1,
-                        };
-                    }
-                }
-            }
-        }
-
+        // spawn apples
         for _ in 0..spawn_apples {
             self.spawn_apple().ok();
             self.apples_eaten += 1;

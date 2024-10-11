@@ -1,7 +1,7 @@
 use crate::{
     board::{AppleCount, Board, BoardSize, PlayerCount},
     game::Points,
-    GameState, Settings,
+    GameState, GizmoSetting, Settings,
 };
 use bevy::prelude::*;
 use bevy_inspector_egui::{
@@ -93,8 +93,14 @@ fn ui_system(
         settings.tps_ramp = settings.tps == 0.0;
         settings.do_game_tick = settings.tps != -1.0;
 
+        ui.horizontal(|ui| {
+            ui.label("Gizmos: ");
+            ui.selectable_value(&mut settings.gizmos, GizmoSetting::None, "None");
+            ui.selectable_value(&mut settings.gizmos, GizmoSetting::TreeSearch, "TreeSearch");
+            ui.selectable_value(&mut settings.gizmos, GizmoSetting::CycleBasis, "CycleBasis");
+        });
+
         ui.checkbox(&mut settings.ai, "AI");
-        ui.checkbox(&mut settings.gizmos, "Gizmos");
         ui.checkbox(&mut settings.walls, "Walls");
         ui.checkbox(&mut settings.walls_debug, "Walls debug");
 
