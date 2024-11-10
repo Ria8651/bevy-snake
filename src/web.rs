@@ -45,7 +45,7 @@ pub struct WebResources {
 
 #[derive(Clone, Debug)]
 pub enum WebCommands {
-    SendInput { direction: Direction },
+    SendInput { direction: Direction, snake_id: u8 },
 }
 
 #[derive(Clone, Debug)]
@@ -110,6 +110,7 @@ async fn board(
 #[derive(Deserialize, Debug)]
 struct Input {
     direction: Direction,
+    snake_id: u8,
 }
 
 async fn send_input(
@@ -119,6 +120,7 @@ async fn send_input(
     web_commands
         .send(WebCommands::SendInput {
             direction: input.direction,
+            snake_id: input.snake_id,
         })
         .unwrap();
 
@@ -192,7 +194,7 @@ pub async fn snake_ws_handler(
                                 }
                             };
 
-                            if let Err(e) = web_commands.send(WebCommands::SendInput { direction: input.direction }) {
+                            if let Err(e) = web_commands.send(WebCommands::SendInput { direction: input.direction, snake_id: input.snake_id }) {
                                 error!("{}", e);
                                 break None;
                             }

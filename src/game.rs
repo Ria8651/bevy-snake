@@ -150,14 +150,12 @@ pub fn update_game(
             .map(|i| i.input_queue.pop_front())
             .collect();
 
-        if inputs[1].is_none() {
-            inputs[1] = web_resources
-                .web_commands
-                .try_recv()
-                .ok()
-                .and_then(|c| match c {
-                    WebCommands::SendInput { direction } => Some(direction),
-                })
+        while let Ok(WebCommands::SendInput {
+            direction,
+            snake_id,
+        }) = web_resources.web_commands.try_recv()
+        {
+            inputs[snake_id as usize] = Some(direction);
         }
 
         let snakes = board.snakes();
