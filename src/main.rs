@@ -1,12 +1,12 @@
 use bevy::prelude::*;
-use bevy_snake::board::{Board, BoardSettings};
-// use effects::ExplosionEv;
+use bevy_snake::{
+    board::{Board, BoardSettings},
+    server::start_server,
+};
 
-// mod effects;
 mod game;
 mod render;
 mod ui;
-mod web;
 
 #[derive(States, Default, Debug, Hash, PartialEq, Eq, Clone)]
 pub enum GameState {
@@ -50,6 +50,9 @@ pub struct GameTime(f32);
 pub struct AnimationTimer(Timer);
 
 fn main() {
+    // start server
+    std::thread::spawn(|| start_server(("0.0.0.0", 1234)));
+
     App::new()
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
@@ -65,7 +68,6 @@ fn main() {
             game::GamePlugin,
             game::AIPlugin,
             render::BoardRenderPlugin,
-            web::WebPlugin,
         ))
         .insert_resource(ClearColor(Color::srgb(0.1, 0.1, 0.1)))
         .insert_resource(Settings {
@@ -81,7 +83,6 @@ fn main() {
         })
         .insert_resource(GameTime::default())
         .init_state::<GameState>()
-        // .add_event::<ExplosionEv>()
         .add_systems(Update, game_state.after(game::update_game))
         .add_systems(Update, settings_system.run_if(in_state(GameState::InGame)))
         .run();

@@ -1,7 +1,4 @@
-use crate::{
-    web::{WebCommands, WebResources, WebUpdates},
-    GameState, GizmoSetting, Settings,
-};
+use crate::{GameState, GizmoSetting, Settings};
 use bevy::{prelude::*, utils::HashMap};
 use bevy_snake::{
     ai::{cycle_basis, AIGizmos, SnakeAI, TreeSearch},
@@ -104,7 +101,6 @@ pub fn update_game(
     mut timer: ResMut<TickTimer>,
     mut board: ResMut<Board>,
     mut next_game_state: ResMut<NextState<GameState>>,
-    mut web_resources: ResMut<WebResources>,
     mut points: ResMut<Points>,
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -148,18 +144,18 @@ pub fn update_game(
     }
 
     if timer.just_finished() || !settings.do_game_tick {
-        let mut inputs: Vec<Option<Direction>> = input_queues
+        let inputs: Vec<Option<Direction>> = input_queues
             .iter_mut()
             .map(|i| i.input_queue.pop_front())
             .collect();
 
-        while let Ok(WebCommands::SendInput {
-            direction,
-            snake_id,
-        }) = web_resources.web_commands.try_recv()
-        {
-            inputs[snake_id as usize] = Some(direction);
-        }
+        // while let Ok(WebCommands::SendInput {
+        //     direction,
+        //     snake_id,
+        // }) = web_resources.web_commands.try_recv()
+        // {
+        //     inputs[snake_id as usize] = Some(direction);
+        // }
 
         let snakes = board.snakes();
         if inputs[0..snakes.len()].iter().any(|i| i.is_some()) || settings.do_game_tick {
@@ -185,12 +181,12 @@ pub fn update_game(
                 }
             }
 
-            web_resources
-                .web_updates
-                .send(WebUpdates::UpdateBoard {
-                    board: board.clone(),
-                })
-                .ok();
+            // web_resources
+            //     .web_updates
+            //     .send(WebUpdates::UpdateBoard {
+            //         board: board.clone(),
+            //     })
+            //     .ok();
         }
     }
 }
