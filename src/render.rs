@@ -1,14 +1,9 @@
 use crate::{
-    board::{Board, Cell},
     game::{SnakeInputs, TickTimer},
     GameState, Settings,
 };
-use bevy::{
-    prelude::*,
-    render::camera::ScalingMode,
-    sprite::{MaterialMesh2dBundle, Mesh2dHandle},
-    utils::HashMap,
-};
+use bevy::{prelude::*, render::camera::ScalingMode, utils::HashMap};
+use bevy_snake::board::{Board, Cell};
 
 pub struct BoardRenderPlugin;
 
@@ -40,13 +35,7 @@ fn setup(
     mut materials: ResMut<Assets<ColorMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
-    commands.spawn((
-        Camera2dBundle {
-            transform: Transform::from_xyz(0.0, 0.0, 500.0),
-            ..default()
-        },
-        MainCamera,
-    ));
+    commands.spawn((Camera2d, Transform::from_xyz(0.0, 0.0, 500.0), MainCamera));
 
     commands.insert_resource(RenderResources {
         apple_texture: asset_server.load("images/apple.png"),
@@ -120,11 +109,8 @@ fn draw_board(
                 };
 
                 commands.spawn((
-                    SpriteBundle {
-                        sprite: Sprite { color, ..default() },
-                        transform: board_pos(Vec2::new(x as f32, y as f32), -10.0),
-                        ..default()
-                    },
+                    Sprite { color, ..default() },
+                    board_pos(Vec2::new(x as f32, y as f32), -10.0),
                     BoardTile,
                 ));
             }
@@ -151,12 +137,19 @@ fn draw_board(
                     continue;
                 }
 
-                let bundle = SpriteBundle {
-                    texture: render_resources.apple_texture.clone(),
-                    transform: board_pos(pos.as_vec2(), 10.0).with_scale(Vec3::splat(1.0 / 512.0)),
-                    ..default()
-                };
-                apples.insert(pos, commands.spawn((bundle, Apple)).id());
+                apples.insert(
+                    pos,
+                    commands
+                        .spawn((
+                            Sprite {
+                                image: render_resources.apple_texture.clone(),
+                                ..default()
+                            },
+                            board_pos(pos.as_vec2(), 10.0).with_scale(Vec3::splat(1.0 / 512.0)),
+                            Apple,
+                        ))
+                        .id(),
+                );
             }
             _ => {
                 if let Some(entity) = apples.remove(&pos) {
@@ -167,7 +160,7 @@ fn draw_board(
     }
 
     for mut apple in apple_query.iter_mut() {
-        let scale = (10.0 * time.elapsed_seconds()).sin() * 0.1 + 1.0;
+        let scale = (10.0 * time.elapsed_secs()).sin() * 0.1 + 1.0;
         apple.scale = Vec3::splat(1.0 / 512.0) * scale;
     }
 
@@ -179,15 +172,18 @@ fn draw_board(
                     continue;
                 }
 
-                let bundle = SpriteBundle {
-                    sprite: Sprite {
-                        color: Color::srgb(0.1, 0.1, 0.1),
-                        ..default()
-                    },
-                    transform: board_pos(pos.as_vec2(), 5.0),
-                    ..default()
-                };
-                walls.insert(pos, commands.spawn(bundle).id());
+                walls.insert(
+                    pos,
+                    commands
+                        .spawn((
+                            Sprite {
+                                color: Color::srgb(0.1, 0.1, 0.1),
+                                ..default()
+                            },
+                            board_pos(pos.as_vec2(), 5.0),
+                        ))
+                        .id(),
+                );
             }
             _ => {
                 if let Some(entity) = walls.remove(&pos) {
@@ -228,12 +224,9 @@ fn draw_board(
 
         for i in 0..parts.len() {
             commands.spawn((
-                MaterialMesh2dBundle {
-                    mesh: Mesh2dHandle(render_resources.circle_mesh.clone()),
-                    material: render_resources.snake_materials[snake_id as usize].clone(),
-                    transform: board_pos(parts[i], 0.0),
-                    ..default()
-                },
+                Mesh2d(render_resources.circle_mesh.clone()),
+                MeshMaterial2d(render_resources.snake_materials[snake_id as usize].clone()),
+                board_pos(parts[i], 0.0),
                 SnakePart,
             ));
         }
@@ -246,17 +239,14 @@ fn draw_board(
 
             let capsule_pos = board_pos(mid_pos, 0.0);
             commands.spawn((
-                MaterialMesh2dBundle {
-                    mesh: Mesh2dHandle(render_resources.square_mesh.clone()),
-                    material: render_resources.snake_materials[snake_id as usize].clone(),
-                    transform: capsule_pos
-                        .looking_at(
-                            capsule_pos.translation + Vec3::Z,
-                            (pos - mid_pos).extend(0.0),
-                        )
-                        .with_scale(Vec3::new(1.0, scale, 1.0)),
-                    ..default()
-                },
+                Mesh2d(render_resources.square_mesh.clone()),
+                MeshMaterial2d(render_resources.snake_materials[snake_id as usize].clone()),
+                capsule_pos
+                    .looking_at(
+                        capsule_pos.translation + Vec3::Z,
+                        (pos - mid_pos).extend(0.0),
+                    )
+                    .with_scale(Vec3::new(1.0, scale, 1.0)),
                 SnakePart,
             ));
         }
@@ -268,15 +258,14 @@ fn draw_board(
     }
     if settings.walls_debug {
         for pos in board.get_spawnable() {
-            let bundle = SpriteBundle {
-                sprite: Sprite {
+            commands.spawn((
+                Sprite {
                     color: Color::srgba(1.0, 0.0, 0.0, 0.15),
                     ..default()
                 },
-                transform: board_pos(pos.as_vec2(), 0.0),
-                ..default()
-            };
-            commands.spawn((bundle, DebugTile));
+                board_pos(pos.as_vec2(), 0.0),
+                DebugTile,
+            ));
         }
     }
 }

@@ -30,7 +30,7 @@ pub struct Board {
 impl Board {
     pub fn empty(width: usize, height: usize) -> Self {
         let cells = vec![Cell::Empty; width * height];
-        let rng = StdRng::from_entropy();
+        let rng = StdRng::from_os_rng();
         let apples_eaten = 0;
         Self {
             cells,

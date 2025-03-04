@@ -1,4 +1,3 @@
-use crate::board::{Board, Direction};
 use actix_web::{
     middleware,
     web::{self, Data},
@@ -6,7 +5,7 @@ use actix_web::{
 };
 use actix_ws::Message;
 use bevy::prelude::*;
-use futures_util::StreamExt;
+use bevy_snake::board::{Board, Direction};
 use lazy_static::lazy_static;
 use serde::Deserialize;
 use std::{
@@ -181,7 +180,7 @@ pub async fn snake_ws_handler(
             }
 
             // received message from WebSocket client
-            msg = msg_stream.next() => {
+            msg = msg_stream.recv() => {
                 match msg {
                     Some(Ok(msg)) => match msg {
                         Message::Text(text) => {

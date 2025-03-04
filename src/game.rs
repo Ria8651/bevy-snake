@@ -1,9 +1,12 @@
 use crate::{
-    board::{Board, BoardEvent, Direction},
     web::{WebCommands, WebResources, WebUpdates},
-    GameState, Settings,
+    GameState, GizmoSetting, Settings,
 };
-use bevy::prelude::*;
+use bevy::{prelude::*, utils::HashMap};
+use bevy_snake::{
+    ai::{cycle_basis, AIGizmos, SnakeAI, TreeSearch},
+    board::{Board, BoardEvent, Cell, Direction},
+};
 use std::{collections::VecDeque, time::Duration};
 
 pub struct GamePlugin;
@@ -188,6 +191,129 @@ pub fn update_game(
                     board: board.clone(),
                 })
                 .ok();
+        }
+    }
+}
+
+pub struct AIPlugin;
+
+impl Plugin for AIPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, ai_system.after(update_game));
+    }
+}
+
+fn ai_system(
+    mut input_queues: ResMut<SnakeInputs>,
+    mut gizmos: Gizmos,
+    mut ai_gizmos: Local<AIGizmos>,
+    settings: Res<Settings>,
+    board: Res<Board>,
+    tick_timer: Res<TickTimer>,
+) {
+    if tick_timer.just_finished() || !settings.do_game_tick {
+        // let ai = RandomWalk;
+        let ai = TreeSearch {
+            max_depth: 100,
+            max_time: Duration::from_millis(5),
+        };
+
+        let mut new_ai_gizmos = AIGizmos::default();
+
+        if let Ok(dir) = ai.chose_move(board.as_ref(), &mut Some(&mut new_ai_gizmos)) {
+            *ai_gizmos = new_ai_gizmos;
+
+            let input_queue = &mut input_queues[0].input_queue;
+            if settings.ai && input_queue.is_empty() {
+                input_queue.push_back(dir);
+            }
+        }
+    }
+
+    if let GizmoSetting::CycleBasis = settings.gizmos {
+        // find cycle basis of the board
+        let mut nodes = HashMap::new();
+        let mut graph = Vec::new();
+        for (pos, cell) in board.cells() {
+            if !matches!(cell, Cell::Wall) {
+                nodes.insert(pos, nodes.len());
+                graph.push(Vec::new());
+            }
+        }
+        for (node, index) in nodes.iter() {
+            for dir in Direction::ALL {
+                let next_node = *node + dir.as_vec2();
+                if let Some(next_index) = nodes.get(&next_node) {
+                    graph[*index].push(*next_index);
+                }
+            }
+        }
+        let cycles = cycle_basis(&graph);
+
+        // show cycles
+        let points: HashMap<_, _> = nodes.iter().map(|(pos, index)| (*index, *pos)).collect();
+        for (index, cycle) in cycles.iter().enumerate() {
+            let color = Color::srgb(
+                (index as f32 / cycles.len() as f32).min(1.0),
+                0.0,
+                1.0 - (index as f32 / cycles.len() as f32).min(1.0),
+            );
+            let com = cycle
+                .iter()
+                .fold(Vec2::ZERO, |acc, &index| acc + points[&index].as_vec2())
+                / cycle.len() as f32;
+            let points = cycle
+                .iter()
+                .map(|&index| points[&index].as_vec2() - (points[&index].as_vec2() - com) * 0.1)
+                .collect::<Vec<_>>();
+            for i in 0..cycle.len() {
+                let start = points[i];
+                let end = points[(i + 1) % cycle.len()];
+                ai_gizmos.arrows.push((start, end, color));
+            }
+        }
+
+        // combine cycles
+        let mut edges = HashMap::new();
+        let mut index = 0;
+        for (cell, neighbors) in graph.iter().enumerate() {
+            for &neighbor in neighbors {
+                if neighbor < cell {
+                    edges.insert((neighbor, cell), index);
+                    index += 1;
+                }
+            }
+        }
+        let mut edge_cycles = Vec::new();
+        for cycle in cycles.iter() {
+            let mut edge_cycle = Vec::new();
+            for i in 0..cycle.len() {
+                let mut a = cycle[i];
+                let mut b = cycle[(i + 1) % cycle.len()];
+                if a > b {
+                    std::mem::swap(&mut a, &mut b);
+                }
+                edge_cycle.push(*edges.get(&(a.min(b), a.max(b))).unwrap());
+            }
+            edge_cycles.push(edge_cycle);
+        }
+    }
+
+    if !matches!(settings.gizmos, GizmoSetting::None) {
+        let board_pos = |pos: Vec2| {
+            Vec2::new(
+                pos.x as f32 - board.width() as f32 / 2.0 + 0.5,
+                pos.y as f32 - board.height() as f32 / 2.0 + 0.5,
+            )
+        };
+        for (start, end, color) in ai_gizmos.lines.iter() {
+            gizmos.line_2d(board_pos(start.as_vec2()), board_pos(end.as_vec2()), *color);
+        }
+        for (start, end, color) in ai_gizmos.arrows.iter() {
+            gizmos.arrow_2d(board_pos(*start), board_pos(*end), *color);
+        }
+        for (pos, color) in ai_gizmos.points.iter() {
+            gizmos.circle_2d(board_pos(pos.as_vec2()), 0.3, *color);
         }
     }
 }

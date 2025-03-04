@@ -1,13 +1,10 @@
-use crate::{
-    board::{AppleCount, Board, BoardSize, PlayerCount},
-    game::Points,
-    GameState, GizmoSetting, Settings,
-};
+use crate::{game::Points, GameState, GizmoSetting, Settings};
 use bevy::prelude::*;
 use bevy_inspector_egui::{
     bevy_egui::{EguiContexts, EguiPlugin},
     egui::{self, Color32},
 };
+use bevy_snake::board::{AppleCount, Board, BoardSize, PlayerCount};
 
 pub struct UiPlugin;
 
