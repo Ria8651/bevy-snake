@@ -2,20 +2,28 @@
 
 use crate::board::{Board, BoardEvent, Cell, Direction};
 use bevy::prelude::*;
-use rand::{prelude::SliceRandom, rngs::StdRng, SeedableRng};
+use rand::prelude::SliceRandom;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     time::{Duration, Instant},
 };
 
 pub trait SnakeAI {
-    fn chose_move(&self, board: &Board, gizmos: &mut Option<&mut AIGizmos>) -> Result<Direction, ()>;
+    fn chose_move(
+        &self,
+        board: &Board,
+        gizmos: &mut Option<&mut AIGizmos>,
+    ) -> Result<Direction, ()>;
 }
 
 pub struct RandomWalk;
 
 impl SnakeAI for RandomWalk {
-    fn chose_move(&self, board: &Board, _gizmos: &mut Option<&mut AIGizmos>) -> Result<Direction, ()> {
+    fn chose_move(
+        &self,
+        board: &Board,
+        _gizmos: &mut Option<&mut AIGizmos>,
+    ) -> Result<Direction, ()> {
         let snakes = board.snakes();
         let snake = snakes.get(&0).ok_or(())?;
 
@@ -86,7 +94,11 @@ pub fn cycle_basis(graph: &Vec<Vec<usize>>) -> Vec<Vec<usize>> {
 }
 
 impl SnakeAI for TreeSearch {
-    fn chose_move(&self, board: &Board, gizmos: &mut Option<&mut AIGizmos>) -> Result<Direction, ()> {
+    fn chose_move(
+        &self,
+        board: &Board,
+        gizmos: &mut Option<&mut AIGizmos>,
+    ) -> Result<Direction, ()> {
         let snakes = board.snakes();
         let snake = snakes.get(&0).ok_or(())?;
 
@@ -131,8 +143,9 @@ impl SnakeAI for TreeSearch {
                 history.push(dir);
 
                 let mut board = board.clone();
-                board.rng = StdRng::from_rng(&mut rng);
-                let events = board.tick_board(&[Some(dir), None, None, None]).unwrap();
+                let events = board
+                    .tick_board(&[Some(dir), None, None, None], &mut rng)
+                    .unwrap();
 
                 let mut score = score;
                 let mut game_over = false;

@@ -1,4 +1,7 @@
-use crate::board::{Board, BoardSettings, Direction};
+use crate::{
+    board::{Board, BoardSettings},
+    GameCommands, GameUpdates,
+};
 use actix_web::{
     middleware::Logger,
     web::{self, Data, Payload},
@@ -7,7 +10,7 @@ use actix_web::{
 use actix_ws::Message;
 use futures::future::{pending, select_all};
 use log::{error, info, warn};
-use serde::{Deserialize, Serialize};
+use rand::{rngs::StdRng, SeedableRng};
 use std::{net::ToSocketAddrs, time::Duration};
 use tokio::{
     select,
@@ -52,6 +55,7 @@ pub async fn start_server<A: ToSocketAddrs + Send + 'static>(ip: A) {
 
 async fn game_loop(mut register_client: Receiver<Client>) {
     let mut clients = Clients::new();
+    let mut rng = StdRng::from_os_rng();
     let mut board = Board::new(BoardSettings::default());
 
     loop {
@@ -63,18 +67,22 @@ async fn game_loop(mut register_client: Receiver<Client>) {
                     break;
                 };
                 info!("new client registered at index {}", clients.clients.len());
+                client.game_updates.send(GameUpdates::Ticked { board: board.clone(), events: Vec::new() }).await.unwrap();
                 clients.push(client);
             }
             // loop through all clients and handle their game commands
             command = clients.next_command() => {
                 match command {
                     GameCommands::Input { direction } => {
-                        if let Err(e) = board.tick_board(&[Some(direction)]) {
-                            error!("{}", e);
-                            break;
-                        }
+                        let events =match  board.tick_board(&[Some(direction)], &mut rng) {
+                            Ok(events) => events,
+                            Err(e) => {
+                                error!("{}", e);
+                                break;
+                            }
+                        };
 
-                        clients.broadcast(GameUpdates::Board { board: board.clone() }).await;
+                        clients.broadcast(GameUpdates::Ticked { board: board.clone(), events }).await;
 
                         println!("{:?}", board);
                     }
@@ -156,16 +164,6 @@ impl Client {
     }
 }
 
-#[derive(Debug, Deserialize)]
-enum GameCommands {
-    Input { direction: Direction },
-}
-
-#[derive(Debug, Clone, Serialize)]
-enum GameUpdates {
-    Board { board: Board },
-}
-
 async fn board(board: Data<Mutex<Option<Board>>>) -> HttpResponse {
     HttpResponse::Ok().json(board.lock().await.clone())
 }
@@ -204,8 +202,8 @@ async fn snake_ws_handler(
             // received a board update from the game
             update = game_updates.recv() => {
                 match update {
-                    Some(GameUpdates::Board { board }) => {
-                        if let Err(e) = session.text(serde_json::to_string(&board).unwrap()).await {
+                    Some(game_update) => {
+                        if let Err(e) = session.text(serde_json::to_string(&game_update).unwrap()).await {
                             error!("{}", e);
                             break None;
                         }

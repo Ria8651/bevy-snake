@@ -1,10 +1,16 @@
 use crate::{GameState, GizmoSetting, Settings};
+use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use bevy::{prelude::*, utils::HashMap};
 use bevy_snake::{
     ai::{cycle_basis, AIGizmos, SnakeAI, TreeSearch},
     board::{Board, BoardEvent, Cell, Direction},
+    GameCommands, GameUpdates,
 };
+use crossbeam::channel::{unbounded, Receiver, Sender};
+use futures::{SinkExt, StreamExt};
+use rand::{rngs::StdRng, SeedableRng};
 use std::{collections::VecDeque, time::Duration};
+use tokio::runtime;
 
 pub struct GamePlugin;
 
@@ -12,6 +18,8 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(TickTimer(Timer::from_seconds(1.0, TimerMode::Repeating)))
             .insert_resource(Board::empty(0, 0))
+            .insert_resource(Rng(StdRng::from_os_rng()))
+            .insert_resource(PlayerConnections::default())
             .insert_resource(Points(vec![0; 4]))
             .insert_resource(SnakeInputs(vec![
                 SnakeInput {
@@ -55,9 +63,63 @@ impl Plugin for GamePlugin {
                     input_queue: VecDeque::new(),
                 },
             ]))
+            .add_systems(Startup, start_ws)
             .add_systems(OnEnter(GameState::Start), reset_game)
             .add_systems(Update, update_game.run_if(in_state(GameState::InGame)));
     }
+}
+
+#[derive(Resource, Deref, DerefMut, Default)]
+pub struct PlayerConnections(Vec<(Receiver<GameUpdates>, Sender<GameCommands>)>);
+
+fn start_ws(mut player_connections: ResMut<PlayerConnections>) {
+    let (tx_updates, rx_updates) = unbounded();
+    let (tx_commands, rx_commands) = unbounded();
+    player_connections.push((rx_updates, tx_commands));
+
+    // start tokio runtime and keep it running
+    let runtime = Box::leak(Box::new(
+        runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap(),
+    ))
+    .handle();
+
+    runtime.spawn(async move {
+        let (ws_stream, _) = connect_async("ws://localhost:1234/ws").await.unwrap();
+        let (mut write, read) = ws_stream.split();
+        info!("Connected to server");
+
+        runtime.spawn(async move {
+            // receive messages from server
+            read.for_each(|msg| async {
+                match msg {
+                    Ok(Message::Text(msg)) => {
+                        let game_updates: GameUpdates =
+                            serde_json::from_str(&msg.to_string()).unwrap();
+                        info!("Received message: {:?}", msg);
+                        tx_updates.send(game_updates).unwrap();
+                    }
+                    Err(e) => {
+                        error!("Error receiving message: {:?}", e);
+                    }
+                    _ => {}
+                }
+            })
+            .await;
+        });
+
+        runtime.spawn_blocking(move || {
+            // send messages to server
+            loop {
+                let game_command = rx_commands.recv().unwrap();
+                info!("Sending message: {:?}", game_command);
+                let msg = Message::Text(serde_json::to_string(&game_command).unwrap().into());
+                runtime.block_on(write.send(msg)).unwrap();
+            }
+        });
+    });
 }
 
 #[derive(Resource, Deref, DerefMut)]
@@ -96,15 +158,20 @@ pub fn reset_game(
     }
 }
 
+#[derive(Resource, Deref, DerefMut)]
+pub struct Rng(StdRng);
+
 pub fn update_game(
     mut input_queues: ResMut<SnakeInputs>,
     mut timer: ResMut<TickTimer>,
     mut board: ResMut<Board>,
     mut next_game_state: ResMut<NextState<GameState>>,
     mut points: ResMut<Points>,
+    // mut rng: ResMut<Rng>,
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     settings: Res<Settings>,
+    player_connections: Res<PlayerConnections>,
 ) {
     if settings.do_game_tick {
         timer.set_duration(Duration::from_secs_f32(1.0 / settings.tps));
@@ -143,52 +210,89 @@ pub fn update_game(
         }
     }
 
-    if timer.just_finished() || !settings.do_game_tick {
-        let inputs: Vec<Option<Direction>> = input_queues
-            .iter_mut()
-            .map(|i| i.input_queue.pop_front())
-            .collect();
+    let (game_updates, game_messages) = &player_connections[0];
+    if let Ok(game_updates) = game_updates.try_recv() {
+        match game_updates {
+            GameUpdates::Ticked {
+                board: new_board,
+                events,
+            } => {
+                info!("Received game updates");
 
-        // while let Ok(WebCommands::SendInput {
-        //     direction,
-        //     snake_id,
-        // }) = web_resources.web_commands.try_recv()
-        // {
-        //     inputs[snake_id as usize] = Some(direction);
-        // }
-
-        let snakes = board.snakes();
-        if inputs[0..snakes.len()].iter().any(|i| i.is_some()) || settings.do_game_tick {
-            match board.tick_board(&inputs) {
-                Ok(events) => {
-                    for event in events {
-                        match event {
-                            BoardEvent::GameOver => {
-                                next_game_state.set(GameState::GameOver);
-                            }
-                            BoardEvent::SnakeDamaged { .. } => {
-                                for (snake_id, _) in board.snakes().into_iter() {
-                                    points[snake_id as usize] += 1;
-                                }
-                            }
-                            _ => {}
+                *board = new_board;
+                for event in events {
+                    match event {
+                        BoardEvent::GameOver => {
+                            next_game_state.set(GameState::GameOver);
+                            return;
                         }
+                        BoardEvent::SnakeDamaged { .. } => {
+                            for (snake_id, _) in board.snakes().into_iter() {
+                                points[snake_id as usize] += 1;
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                Err(e) => {
-                    warn!("Board tick error: {:?}", e);
-                    next_game_state.set(GameState::GameOver);
-                }
-            }
 
-            // web_resources
-            //     .web_updates
-            //     .send(WebUpdates::UpdateBoard {
-            //         board: board.clone(),
-            //     })
-            //     .ok();
+                let snakes = board.snakes();
+                let direction = input_queues[0]
+                    .input_queue
+                    .pop_front()
+                    .unwrap_or(snakes[&0].dir);
+                game_messages
+                    .send(GameCommands::Input { direction })
+                    .unwrap();
+            }
         }
     }
+
+    // if timer.just_finished() || !settings.do_game_tick {
+    //     let inputs: Vec<Option<Direction>> = input_queues
+    //         .iter_mut()
+    //         .map(|i| i.input_queue.pop_front())
+    //         .collect();
+
+    //     // while let Ok(WebCommands::SendInput {
+    //     //     direction,
+    //     //     snake_id,
+    //     // }) = web_resources.web_commands.try_recv()
+    //     // {
+    //     //     inputs[snake_id as usize] = Some(direction);
+    //     // }
+
+    //     let snakes = board.snakes();
+    //     if inputs[0..snakes.len()].iter().any(|i| i.is_some()) || settings.do_game_tick {
+    //         match board.tick_board(&inputs, &mut rng) {
+    //             Ok(events) => {
+    //                 for event in events {
+    //                     match event {
+    //                         BoardEvent::GameOver => {
+    //                             next_game_state.set(GameState::GameOver);
+    //                         }
+    //                         BoardEvent::SnakeDamaged { .. } => {
+    //                             for (snake_id, _) in board.snakes().into_iter() {
+    //                                 points[snake_id as usize] += 1;
+    //                             }
+    //                         }
+    //                         _ => {}
+    //                     }
+    //                 }
+    //             }
+    //             Err(e) => {
+    //                 warn!("Board tick error: {:?}", e);
+    //                 next_game_state.set(GameState::GameOver);
+    //             }
+    //         }
+
+    //         // web_resources
+    //         //     .web_updates
+    //         //     .send(WebUpdates::UpdateBoard {
+    //         //         board: board.clone(),
+    //         //     })
+    //         //     .ok();
+    //     }
+    // }
 }
 
 pub struct AIPlugin;

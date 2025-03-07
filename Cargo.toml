@@ -39,6 +39,7 @@ lazy_static = "1.5.0"
 colored = "3.0.0"
 log = "0.4.26"
 colog = "1.3.0"
+async-tungstenite = { version = "0.29.1", features = ["tokio-runtime"] }
 
 [profile.release]
 debug = true

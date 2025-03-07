@@ -4,12 +4,12 @@ use bevy::{
     prelude::*,
     utils::{hashbrown::HashSet, HashMap},
 };
-use rand::{rngs::StdRng, seq::IteratorRandom, SeedableRng};
+use rand::{seq::IteratorRandom, Rng};
 use serde::{Deserialize, Serialize};
 use std::ops::{Index, IndexMut};
 use thiserror::Error;
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Cell {
     Empty,
     Wall,
@@ -17,11 +17,9 @@ pub enum Cell {
     Apple { natural: bool }, // natural apples respawn
 }
 
-#[derive(Resource, Component, Clone, Serialize)]
+#[derive(Resource, Component, Clone, Serialize, Deserialize)]
 pub struct Board {
     cells: Vec<Cell>,
-    #[serde(skip)]
-    pub rng: StdRng,
     width: usize,
     height: usize,
     apples_eaten: usize,
@@ -30,11 +28,9 @@ pub struct Board {
 impl Board {
     pub fn empty(width: usize, height: usize) -> Self {
         let cells = vec![Cell::Empty; width * height];
-        let rng = StdRng::from_os_rng();
         let apples_eaten = 0;
         Self {
             cells,
-            rng,
             width,
             height,
             apples_eaten,
@@ -131,13 +127,13 @@ impl Board {
         pos.x >= 0 && pos.y >= 0 && pos.x < self.width as i32 && pos.y < self.height as i32
     }
 
-    pub fn spawn_apple(&mut self) -> Result<(), ()> {
+    pub fn spawn_apple(&mut self, rng: &mut impl Rng) -> Result<(), ()> {
         let empty = self
             .cells
             .iter()
             .enumerate()
             .filter(|(_, cell)| matches!(cell, Cell::Empty))
-            .choose(&mut self.rng);
+            .choose(rng);
 
         if let Some((i, _)) = empty {
             self.cells[i] = Cell::Apple { natural: true };
@@ -251,9 +247,9 @@ impl Board {
         spawnable
     }
 
-    pub fn spawn_wall(&mut self) -> Result<(), ()> {
+    pub fn spawn_wall(&mut self, rng: &mut impl Rng) -> Result<(), ()> {
         let spawnable = self.get_spawnable();
-        let pos = spawnable.into_iter().choose(&mut self.rng).ok_or(())?;
+        let pos = spawnable.into_iter().choose(rng).ok_or(())?;
         self[pos] = Cell::Wall;
         Ok(())
     }
@@ -261,6 +257,7 @@ impl Board {
     pub fn tick_board(
         &mut self,
         inputs: &[Option<Direction>],
+        rng: &mut impl Rng,
     ) -> Result<Vec<BoardEvent>, BoardError> {
         let mut board_events = Vec::new();
         let mut heads = HashMap::new();
@@ -370,11 +367,11 @@ impl Board {
 
         // spawn apples
         for _ in 0..spawn_apples {
-            self.spawn_apple().ok();
+            self.spawn_apple(rng).ok();
             self.apples_eaten += 1;
 
             if self.apples_eaten % 2 == 1 {
-                self.spawn_wall().ok();
+                self.spawn_wall(rng).ok();
             }
         }
 
@@ -572,7 +569,7 @@ impl Default for BoardSettings {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BoardEvent {
     GameOver,
     AppleEaten { snake: u8 },
